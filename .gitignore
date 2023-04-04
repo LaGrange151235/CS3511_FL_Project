@@ -1,7 +1,0 @@
-.gitignore
-*.pdf
-*.ppt
-*.pptx
-*.txt
-/data
-*/__pycache__/
