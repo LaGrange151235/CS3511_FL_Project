@@ -26,5 +26,3 @@ class Net(nn.Module):
         x = self.fc2(x)
         output = nn.functional.log_softmax(x, dim=1)
         return output
-
-

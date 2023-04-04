@@ -2,10 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as Data
-import torchvision
-import dill
 import numpy as np
-import os
 import random
 import argparse
 import datetime
@@ -21,9 +18,12 @@ def set_seed(Seed=100):
     torch.cuda.manual_seed_all(Seed)
 
 class client:
-    def __init__(self, client_id, path):
+    def __init__(self, client_id, path, device):
+        self.device = device
         self.client_id = client_id
         self.num_epochs = 10
+        self.model = model.Net()
+        self.model = self.model.to(self.device)
         self.batch_size = 10
         self.epoch = 0
         self.train_datapath = path
@@ -31,21 +31,18 @@ class client:
         self.test_dataset = dataset_manager.get_test_dataset()
         self.train_dataloader = Data.DataLoader(dataset=self.train_dataset, batch_size=self.batch_size, shuffle=True)
         self.test_dataloader = Data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=True)
-        self.model = model.Net()
+        
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.SGD(self.model.parameters(), lr=0.01, momentum=0.5)
-        #self.criterion = None
-        #self.optimizer = None
     
     def logging(self, string):
         print('['+str(datetime.datetime.now())+'] [Client '+str(self.client_id)+'] '+str(string))
 
     def train(self):
-        #self.criterion = nn.CrossEntropyLoss()
-        #self.optimizer = optim.SGD(self.model.parameters(), lr=0.01, momentum=0.5)
-        with torch.autograd.set_detect_anomaly(True):
             self.model.train()
             for batch_idx, (data, target) in enumerate(self.train_dataloader):
+                data = data.to(self.device)
+                target = target.to(self.device)
                 self.optimizer.zero_grad()
                 output = self.model(data)
                 loss = self.criterion(output, target)
@@ -61,6 +58,8 @@ class client:
         correct = 0
         with torch.no_grad():
             for data, target in self.test_dataloader:
+                data = data.to(self.device)
+                target = target.to(self.device)
                 output = self.model(data)
                 test_loss += self.criterion(output, target).item()
                 pred = output.argmax(dim=1, keepdim=True)
@@ -74,7 +73,7 @@ if __name__=="__main__":
     parser.add_argument('--client_id', type=int, default=1)
     args = parser.parse_args()
     
-    path = "./data/Client"+str(args.client_id)+".pkl"
+    path = "../../data/Client"+str(args.client_id)+".pkl"
     client_process = client(args.client_id, path)
     set_seed()
     for epoch in range(1,11):

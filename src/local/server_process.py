@@ -11,8 +11,10 @@ import model
 
 class server:
     def __init__(self, client_number):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.client_number = client_number
         self.global_model = model.Net()
+        self.global_model = self.global_model.to(self.device)
         self.batch_size = 10
         self.criterion = nn.CrossEntropyLoss()
         self.test_dataset = dataset_manager.get_test_dataset()
@@ -29,7 +31,7 @@ class server:
 
     def start_client_process(self, client_id):
         path = "./data/Client"+str(client_id)+".pkl"
-        client = client_process.client(client_id, path)
+        client = client_process.client(client_id, path, self.device)
         client_process.set_seed()
         tensor_list = []
         for param in client.model.parameters():
@@ -38,7 +40,7 @@ class server:
 
         for epoch in range(1,5):
             for i, param in enumerate(client.model.parameters()):
-                param.data = self.aggregated_tensor_list[i]
+                param.data = self.aggregated_tensor_list[i].to(self.device)
 
             client.epoch = epoch
             client.train()
@@ -58,7 +60,7 @@ class server:
                 time.sleep(0.01)
             aggregated_tensor_list = []
             for tensor_id, tensor_content in enumerate(self.arrived_tensor_list[0]):
-                sum_tensor = torch.zeros(tensor_content.size())
+                sum_tensor = torch.zeros(tensor_content.size()).to(self.device)
                 for rank in range(self.client_number):
                     sum_tensor += self.arrived_tensor_list[rank][tensor_id]
                 aggregated_tensor = sum_tensor / self.client_number
@@ -87,13 +89,14 @@ class server:
         correct = 0
         with torch.no_grad():
             for data, target in self.test_dataloader:
+                data = data.to(self.device)
+                target = target.to(self.device)
                 output = self.global_model(data)
                 test_loss += self.criterion(output, target).item()
                 pred = output.argmax(dim=1, keepdim=True)
                 correct += pred.eq(target.view_as(pred)).sum().item()
         test_loss /= len(self.test_dataloader.dataset)
         self.logging("Test set: Average loss: %.4f, Accuracy: %d/%d (%.0f%s)" % (test_loss, correct, len(self.test_dataloader.dataset), 100. * correct / len(self.test_dataloader.dataset), "%"))
-
 
 server_process = server(2)
 server_process.start_server_process()
