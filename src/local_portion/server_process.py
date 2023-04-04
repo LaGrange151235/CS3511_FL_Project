@@ -2,6 +2,7 @@ import threading
 import datetime
 import time
 import random
+import argparse
 import torch
 import torch.utils.data as Data
 import torch.nn as nn
@@ -24,11 +25,13 @@ class server:
         self.arrived = [0] * client_number
         self.arrived_tensor_list = [None] * client_number
         self.aggregated_tensor_list = []
+        self.log_file = open("./Logs/local_portion/server_log.txt", "w")
         for param in self.global_model.parameters():
             self.aggregated_tensor_list.append(param.data)
     
     def logging(self, string):
         print('['+str(datetime.datetime.now())+'] [Server] '+str(string))
+        self.log_file.write('['+str(datetime.datetime.now())+'] [Server] '+str(string)+'\n')
 
 
     def start_client_process(self, client_id):
@@ -107,5 +110,9 @@ class server:
         test_loss /= len(self.test_dataloader.dataset)
         self.logging("Test set: Average loss: %.4f, Accuracy: %d/%d (%.0f%s)" % (test_loss, correct, len(self.test_dataloader.dataset), 100. * correct / len(self.test_dataloader.dataset), "%"))
 
-server_process = server(4, 2)
-server_process.start_server_process()
+if __name__=="__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--portion_number', type=int, default=2)
+    args = parser.parse_args()
+    server_process = server(20, portion_number=args.portion_number)
+    server_process.start_server_process()

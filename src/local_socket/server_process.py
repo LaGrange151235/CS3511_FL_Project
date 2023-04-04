@@ -7,6 +7,7 @@ import torch.nn as nn
 
 import client_process
 import dataset_manager
+import socket_manager
 import model
 
 class server:
@@ -22,7 +23,12 @@ class server:
         self.arrived = [0] * client_number
         self.arrived_tensor_list = [None] * client_number
         self.aggregated_tensor_list = []
-        self.log_file = open("./Logs/local/server_log.txt", "w")
+        self.server_sockets = []
+        self.client_sockets = []
+        self.log_file = open("./Logs/local_socket/server_log.txt", "w")
+        for i in range(client_number):
+            self.server_sockets.append(socket_manager.server_socket(device=self.device, port=(8121+i)))
+            self.client_sockets.append(socket_manager.client_socket(port=(8081+i)))
         for param in self.global_model.parameters():
             self.aggregated_tensor_list.append(param.data)
     
@@ -30,35 +36,22 @@ class server:
         print('['+str(datetime.datetime.now())+'] [Server] '+str(string))
         self.log_file.write('['+str(datetime.datetime.now())+'] [Server] '+str(string)+'\n')
 
-
-    def start_client_process(self, client_id):
-        path = "./data/Client"+str(client_id)+".pkl"
-        client = client_process.client(client_id, path, self.device)
-        client_process.set_seed()
-        tensor_list = []
-        for param in client.model.parameters():
-            tensor_list.append(param.data)
-        self.arrived_tensor_list[client_id-1] = tensor_list
+    def start_client_socket_listening_process(self, client_id):
+        self.client_sockets[client_id-1].send_tensor_list(self.aggregated_tensor_list)
 
         for epoch in range(1,5):
-            for i, param in enumerate(client.model.parameters()):
-                param.data = self.aggregated_tensor_list[i].to(self.device)
-
-            client.epoch = epoch
-            client.train()
-            client.test()
+            tensor_list = self.server_sockets[client_id-1].rec_tensor_list()
+            self.logging("Recieve tensor_list")
             self.arrived[client_id-1] = 1
-            
-            tensor_list = []
-            for param in client.model.parameters():
-                tensor_list.append(param.data)
             self.arrived_tensor_list[client_id-1] = tensor_list
-            while self.arrived[client_id-1]:
+            while self.arrived[client_id-1] == 1:
                 time.sleep(0.01)
-
+            self.client_sockets[client_id-1].send_tensor_list(self.aggregated_tensor_list)
+            self.logging("Send tensor_list")
+        
     def aggregation_process(self):
         for epoch in range(1,5):
-            while sum(self.arrived) != self.client_number:
+            while sum(self.arrived) != self.client_number:                
                 time.sleep(0.01)
             aggregated_tensor_list = []
             for tensor_id, tensor_content in enumerate(self.arrived_tensor_list[0]):
@@ -77,10 +70,9 @@ class server:
     
             self.arrived = [0] * self.client_number
 
-      
     def start_server_process(self):
         for i in range(1, self.client_number+1):
-            t = threading.Thread(target=self.start_client_process, args=(i, ))
+            t = threading.Thread(target=self.start_client_socket_listening_process, args=(i, ))
             t.start()
         t = threading.Thread(target=self.aggregation_process, args=())
         t.start()
@@ -100,5 +92,7 @@ class server:
         test_loss /= len(self.test_dataloader.dataset)
         self.logging("Test set: Average loss: %.4f, Accuracy: %d/%d (%.0f%s)" % (test_loss, correct, len(self.test_dataloader.dataset), 100. * correct / len(self.test_dataloader.dataset), "%"))
 
-server_process = server(20)
-server_process.start_server_process()
+if __name__=="__main__":
+    server_process = server(2)
+    server_process.start_server_process()
+    server_process.test()

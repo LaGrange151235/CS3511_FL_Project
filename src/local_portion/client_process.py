@@ -31,12 +31,13 @@ class client:
         self.test_dataset = dataset_manager.get_test_dataset()
         self.train_dataloader = Data.DataLoader(dataset=self.train_dataset, batch_size=self.batch_size, shuffle=True)
         self.test_dataloader = Data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=True)
-        
+        self.log_file = open("./Logs/local_portion/client_"+str(self.client_id)+"_log.txt", "w")
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.SGD(self.model.parameters(), lr=0.01, momentum=0.5)
+        self.optimizer = optim.SGD(self.model.parameters(), lr=0.0001, momentum=0.5)
     
     def logging(self, string):
         print('['+str(datetime.datetime.now())+'] [Client '+str(self.client_id)+'] '+str(string))
+        self.log_file.write('['+str(datetime.datetime.now())+'] [Client '+str(self.client_id)+'] '+str(string)+'\n')
 
     def train(self):
             self.model.train()
