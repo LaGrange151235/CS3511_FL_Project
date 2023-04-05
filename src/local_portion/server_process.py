@@ -116,3 +116,4 @@ if __name__=="__main__":
     args = parser.parse_args()
     server_process = server(20, portion_number=args.portion_number)
     server_process.start_server_process()
+    torch.save(server_process.global_model, "final_global_model_local_portion.pt")

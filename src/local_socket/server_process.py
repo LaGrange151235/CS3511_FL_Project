@@ -4,54 +4,90 @@ import time
 import torch
 import torch.utils.data as Data
 import torch.nn as nn
+import socket
 
 import client_process
 import dataset_manager
-import socket_manager
 import model
 
 class server:
     def __init__(self, client_number):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.client_number = client_number
-        self.global_model = model.Net()
-        self.global_model = self.global_model.to(self.device)
-        self.batch_size = 10
+        
+        """define model"""
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
+        self.global_model = model.Net().to(self.device)
         self.criterion = nn.CrossEntropyLoss()
+        self.batch_size = 10
+        self.num_epochs = 3
+        
+        """define data"""
         self.test_dataset = dataset_manager.get_test_dataset()
         self.test_dataloader = Data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=True)
+        
+        """define aggregation tools"""
         self.arrived = [0] * client_number
         self.arrived_tensor_list = [None] * client_number
         self.aggregated_tensor_list = []
-        self.server_sockets = []
-        self.client_sockets = []
-        self.log_file = open("./Logs/local_socket/server_log.txt", "w")
-        for i in range(client_number):
-            self.server_sockets.append(socket_manager.server_socket(device=self.device, port=(8121+i)))
-            self.client_sockets.append(socket_manager.client_socket(port=(8081+i)))
         for param in self.global_model.parameters():
             self.aggregated_tensor_list.append(param.data)
-    
+        
+        """define log"""
+        self.log_file = open("./Logs/local_socket/server_log.txt", "w")
+        
     def logging(self, string):
         print('['+str(datetime.datetime.now())+'] [Server] '+str(string))
         self.log_file.write('['+str(datetime.datetime.now())+'] [Server] '+str(string)+'\n')
 
-    def start_client_socket_listening_process(self, client_id):
-        self.client_sockets[client_id-1].send_tensor_list(self.aggregated_tensor_list)
+    def send_global_model(self, i):
+        """send global model"""
+        torch.save(self.global_model, "send_global_model.pt")
+        global_model = open("send_global_model.pt", "rb")
+        client_socket = socket.socket()
+        client_socket.connect(("127.0.0.1", 8081+i))
+        line = global_model.read(1024)
+        while(line):
+            client_socket.send(line)
+            line = global_model.read(1024)
+        client_socket.close()
+        global_model.close()
 
-        for epoch in range(1,5):
-            tensor_list = self.server_sockets[client_id-1].rec_tensor_list()
-            self.logging("Recieve tensor_list")
-            self.arrived[client_id-1] = 1
-            self.arrived_tensor_list[client_id-1] = tensor_list
-            while self.arrived[client_id-1] == 1:
-                time.sleep(0.01)
-            self.client_sockets[client_id-1].send_tensor_list(self.aggregated_tensor_list)
-            self.logging("Send tensor_list")
-        
     def aggregation_process(self):
-        for epoch in range(1,5):
-            while sum(self.arrived) != self.client_number:                
+        server_socket = socket.socket()
+        server_socket.bind(("127.0.0.1", 8080))
+        server_socket.listen()
+
+        for epoch in range(0, self.num_epochs):
+            """send global model"""
+            for i in range(self.client_number):
+                #t = threading.Thread(target=self.send_global_model, args=(i, ))
+                #t.start()
+                self.send_global_model(i)
+
+            """wait for client model"""
+            for i in range(self.client_number):
+                con, addr = server_socket.accept()
+                client_model = open("rec_client_"+str(i+1)+"_model.pt", "wb")
+                line = con.recv(1024)
+                while(len(line) == 0):
+                    line = con.recv(1024)
+                self.logging("waited")
+                while(line):
+                    client_model.write(line)
+                    line = con.recv(1024)
+                client_model.close()
+                con.close()
+
+                rec_model = torch.load("rec_client_"+str(i+1)+"_model.pt")
+                tensor_list = []
+                for param in rec_model.parameters():
+                    tensor_list.append(param)
+                self.arrived_tensor_list[i] = tensor_list
+                self.arrived[i] = 1
+
+
+            while sum(self.arrived) != self.client_number:
                 time.sleep(0.01)
             aggregated_tensor_list = []
             for tensor_id, tensor_content in enumerate(self.arrived_tensor_list[0]):
@@ -70,13 +106,6 @@ class server:
     
             self.arrived = [0] * self.client_number
 
-    def start_server_process(self):
-        for i in range(1, self.client_number+1):
-            t = threading.Thread(target=self.start_client_socket_listening_process, args=(i, ))
-            t.start()
-        t = threading.Thread(target=self.aggregation_process, args=())
-        t.start()
-    
     def test(self):
         self.global_model.eval()
         test_loss = 0
@@ -93,6 +122,6 @@ class server:
         self.logging("Test set: Average loss: %.4f, Accuracy: %d/%d (%.0f%s)" % (test_loss, correct, len(self.test_dataloader.dataset), 100. * correct / len(self.test_dataloader.dataset), "%"))
 
 if __name__=="__main__":
-    server_process = server(2)
-    server_process.start_server_process()
-    server_process.test()
+    server_process = server(20)
+    server_process.aggregation_process()
+    torch.save(server_process.global_model, "final_global_model_local_socket.pt")

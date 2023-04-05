@@ -102,3 +102,4 @@ class server:
 
 server_process = server(20)
 server_process.start_server_process()
+torch.save(server_process.global_model, "final_global_model_local.pt")
