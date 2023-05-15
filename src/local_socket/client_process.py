@@ -7,48 +7,59 @@ import random
 import argparse
 import datetime
 import socket
+import os
 
 import dataset_manager
 import model
 
 import warnings
 
-
-def set_seed(Seed=100):    
-    random.seed(Seed)    
-    np.random.seed(Seed)    
-    torch.manual_seed(Seed)    
-    torch.cuda.manual_seed(Seed)    
-    torch.cuda.manual_seed_all(Seed)
-
 class client:
-    def __init__(self, client_id, path):
+    def __init__(self, client_id, path, num_epoch):
+        self.set_seed()
         self.client_id = client_id
 
         """define model"""
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        #self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device("cpu")
-        self.model = model.Net().to(self.device)
+        self.model = model.Net()
+        self.model = self.model.to(self.device)
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.SGD(self.model.parameters(), lr=0.0001, momentum=0.5)
         self.batch_size = 10
-        self.num_epochs = 3
+        self.num_epochs = num_epoch
         self.epoch = 0
 
         """define data"""
         self.train_datapath = path
         self.train_dataset = dataset_manager.get_train_dataset(self.train_datapath)
-        self.test_dataset = dataset_manager.get_test_dataset()
         self.train_dataloader = Data.DataLoader(dataset=self.train_dataset, batch_size=self.batch_size, shuffle=True)
-        self.test_dataloader = Data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=True)
+        self.test_dataset = dataset_manager.get_test_dataset()
+        self.test_dataloader = Data.DataLoader(dataset=self.test_dataset)
 
         """define log"""
-        self.log_file = open("./Logs/local_socket/client_"+str(self.client_id)+"_log.txt", "w")
+        self.log_file_path = "./Logs/local_socket/"
+        self.log_file = None
+        if os.path.exists(self.log_file_path) == False:
+            os.makedirs(self.log_file_path)
+
+        """define file path"""
+        self.file_path = "./model/client"+str(client_id)+"/"
+        if os.path.exists(self.file_path) == False:
+            os.makedirs(self.file_path)
         
+    def set_seed(self, Seed=100):    
+        random.seed(Seed)    
+        np.random.seed(Seed)    
+        torch.manual_seed(Seed)    
+        torch.cuda.manual_seed(Seed)    
+        torch.cuda.manual_seed_all(Seed)
+
     def logging(self, string):
-        log_info = '['+str(datetime.datetime.now())+'] [Client '+str(self.client_id)+'] '+str(string)
-        print(log_info)
-        self.log_file.write(log_info)
+        print('['+str(datetime.datetime.now())+'] [Client '+str(self.client_id)+'] '+str(string))
+        self.log_file = open("./Logs/local_socket/client_"+str(self.client_id)+"_log.txt", "a")
+        self.log_file.write('['+str(datetime.datetime.now())+'] [Client '+str(self.client_id)+'] '+str(string)+'\n')
+        self.log_file.close()
 
     def train(self):
         self.model.train()
@@ -60,9 +71,9 @@ class client:
             loss = self.criterion(output, target)
             loss.backward()
             self.optimizer.step()
-            if batch_idx % 100 == 0:
+            if batch_idx % 10 == 0:
                 self.logging("Train Epoch: %d [%d/%d (%.0f%s)]\tLoss:%.6f" % (self.epoch, batch_idx*len(data), len(self.train_dataloader.dataset), 100. * batch_idx/len(self.train_dataloader), "%", loss.item()))
-                self.test()
+        #self.test()
 
     def test(self):
         self.model.eval()
@@ -85,35 +96,36 @@ if __name__=="__main__":
     """parameters"""
     parser = argparse.ArgumentParser()
     parser.add_argument('--client_id', type=int, default=1)
+    parser.add_argument('--num_epoch', type=int, default=5)
     args = parser.parse_args()
 
     """define client process"""
     path = "./data/Client"+str(args.client_id)+".pkl"
-    client_process = client(args.client_id, path)
-    set_seed()
+    client_process = client(args.client_id, path, args.num_epoch)
 
     """main process"""
     server_socket = socket.socket()
     server_socket.bind(("127.0.0.1", 8080+client_process.client_id))
     server_socket.listen()
 
-    for epoch in range(0, client_process.num_epochs):
+    for epoch in range(1, client_process.num_epochs+1):
+        '''receive global model'''
         client_process.epoch = epoch
         con, addr = server_socket.accept()
-        client_process.logging("rec from %s" % (str(addr)))
-        global_model = open("rec_global_model"+str(client_process.client_id)+".pt", "wb")
+        global_model = open(client_process.file_path+"rec_global_model"+str(client_process.client_id)+".pt", "wb")
         line = con.recv(1024)
         while(len(line) == 0):
             line = con.recv(1024)
-        client_process.logging("waited")
+        client_process.logging("waiting for global model")
         while(line):
             global_model.write(line)
             line = con.recv(1024)
         global_model.close()
         con.close()
+        client_process.logging("rec from %s" % (str(addr)))
 
         """load global model"""
-        rec_model = torch.load("rec_global_model"+str(client_process.client_id)+".pt")
+        rec_model = torch.load(client_process.file_path+"rec_global_model"+str(client_process.client_id)+".pt")
         tensor_list = []
         for param in rec_model.parameters():
             tensor_list.append(param)
@@ -122,10 +134,10 @@ if __name__=="__main__":
         
         """start train"""
         client_process.train()
-        torch.save(client_process.model, "send_client_model"+str(client_process.client_id)+".pt")
+        torch.save(client_process.model, client_process.file_path+"send_client_model"+str(client_process.client_id)+".pt")
 
         """send client model"""
-        client_model = open("send_client_model"+str(client_process.client_id)+".pt", "rb")
+        client_model = open(client_process.file_path+"send_client_model"+str(client_process.client_id)+".pt", "rb")
         client_socket = socket.socket()
         client_socket.connect(("127.0.0.1", 8080))
         client_process.logging("send to server")

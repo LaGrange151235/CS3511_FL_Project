@@ -1,30 +1,33 @@
-import threading
+import argparse
 import datetime
 import time
 import torch
 import torch.utils.data as Data
 import torch.nn as nn
 import socket
-
-import client_process
+import os
+import warnings
+import random
+import numpy as np
 import dataset_manager
 import model
 
 class server:
-    def __init__(self, client_number):
+    def __init__(self, client_number, num_epoch):
+        self.set_seed()
         self.client_number = client_number
         
         """define model"""
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        #self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device("cpu")
         self.global_model = model.Net().to(self.device)
         self.criterion = nn.CrossEntropyLoss()
         self.batch_size = 10
-        self.num_epochs = 3
+        self.num_epochs = num_epoch
         
         """define data"""
         self.test_dataset = dataset_manager.get_test_dataset()
-        self.test_dataloader = Data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=True)
+        self.test_dataloader = Data.DataLoader(dataset=self.test_dataset)
         
         """define aggregation tools"""
         self.arrived = [0] * client_number
@@ -34,17 +37,35 @@ class server:
             self.aggregated_tensor_list.append(param.data)
         
         """define log"""
-        self.log_file = open("./Logs/local_socket/server_log.txt", "w")
+        self.log_file_path = "./Logs/local_socket/"
+        self.log_file = None
+        if os.path.exists(self.log_file_path) == False:
+            os.makedirs(self.log_file_path)
+
+        """define file path"""
+        self.file_path = "./model/server/"
+        if os.path.exists(self.file_path) == False:
+            os.makedirs(self.file_path)
         
+    def set_seed(self, Seed=100):    
+        random.seed(Seed)    
+        np.random.seed(Seed)    
+        torch.manual_seed(Seed)    
+        torch.cuda.manual_seed(Seed)    
+        torch.cuda.manual_seed_all(Seed)
+
     def logging(self, string):
         print('['+str(datetime.datetime.now())+'] [Server] '+str(string))
+        self.log_file = open("./Logs/local_socket/server_log.txt", "a")
         self.log_file.write('['+str(datetime.datetime.now())+'] [Server] '+str(string)+'\n')
+        self.log_file.close()
 
     def send_global_model(self, i):
         """send global model"""
-        torch.save(self.global_model, "send_global_model.pt")
-        global_model = open("send_global_model.pt", "rb")
+        torch.save(self.global_model, self.file_path+"send_global_model.pt")
+        global_model = open(self.file_path+"send_global_model.pt", "rb")
         client_socket = socket.socket()
+        self.logging("send global model to client %d" % (i+1))
         client_socket.connect(("127.0.0.1", 8081+i))
         line = global_model.read(1024)
         while(line):
@@ -61,32 +82,32 @@ class server:
         for epoch in range(0, self.num_epochs):
             """send global model"""
             for i in range(self.client_number):
-                #t = threading.Thread(target=self.send_global_model, args=(i, ))
-                #t.start()
                 self.send_global_model(i)
 
             """wait for client model"""
             for i in range(self.client_number):
+                '''receive client update'''
                 con, addr = server_socket.accept()
-                client_model = open("rec_client_"+str(i+1)+"_model.pt", "wb")
+                client_model = open(self.file_path+"rec_client_"+str(i+1)+"_model.pt", "wb")
                 line = con.recv(1024)
                 while(len(line) == 0):
                     line = con.recv(1024)
-                self.logging("waited")
+                self.logging("waiting for client %d" % (i+1))
                 while(line):
                     client_model.write(line)
                     line = con.recv(1024)
                 client_model.close()
                 con.close()
-
-                rec_model = torch.load("rec_client_"+str(i+1)+"_model.pt")
+                
+                '''load client model'''
+                rec_model = torch.load(self.file_path+"rec_client_"+str(i+1)+"_model.pt")
                 tensor_list = []
                 for param in rec_model.parameters():
                     tensor_list.append(param)
                 self.arrived_tensor_list[i] = tensor_list
                 self.arrived[i] = 1
 
-
+            '''BSP aggregation scheme'''
             while sum(self.arrived) != self.client_number:
                 time.sleep(0.01)
             aggregated_tensor_list = []
@@ -103,7 +124,6 @@ class server:
 
             self.logging("Tensors aggregated")
             self.test()
-    
             self.arrived = [0] * self.client_number
 
     def test(self):
@@ -122,6 +142,11 @@ class server:
         self.logging("Test set: Average loss: %.4f, Accuracy: %d/%d (%.0f%s)" % (test_loss, correct, len(self.test_dataloader.dataset), 100. * correct / len(self.test_dataloader.dataset), "%"))
 
 if __name__=="__main__":
-    server_process = server(20)
+    warnings.filterwarnings("ignore")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--client_num', type=int, default=20)
+    parser.add_argument('--num_epoch', type=int, default=5)
+    args = parser.parse_args()
+    server_process = server(args.client_num, args.num_epoch)
     server_process.aggregation_process()
     torch.save(server_process.global_model, "final_global_model_local_socket.pt")

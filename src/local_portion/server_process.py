@@ -1,8 +1,9 @@
+import argparse
 import threading
 import datetime
 import time
+import os
 import random
-import argparse
 import torch
 import torch.utils.data as Data
 import torch.nn as nn
@@ -12,55 +13,39 @@ import dataset_manager
 import model
 
 class server:
-    def __init__(self, client_number, portion_number):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self, client_number, num_epoch, ratio):
+        self.portion_number = int(ratio*client_number)
         self.client_number = client_number
-        self.portion_number = portion_number
+        self.num_epoch = num_epoch
+        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.global_model = model.Net()
         self.global_model = self.global_model.to(self.device)
-        self.batch_size = 10
         self.criterion = nn.CrossEntropyLoss()
+        
         self.test_dataset = dataset_manager.get_test_dataset()
-        self.test_dataloader = Data.DataLoader(dataset=self.test_dataset, batch_size=self.batch_size, shuffle=True)
+        self.test_dataloader = Data.DataLoader(dataset=self.test_dataset)
+        
         self.arrived = [0] * client_number
         self.arrived_tensor_list = [None] * client_number
         self.aggregated_tensor_list = []
-        self.log_file = open("./Logs/local_portion/server_log.txt", "w")
+        
+        self.log_file_path = "./Logs/local_portion/"
+        self.log_file = None
+        if os.path.exists(self.log_file_path) == False:
+            os.makedirs(self.log_file_path)
         for param in self.global_model.parameters():
             self.aggregated_tensor_list.append(param.data)
     
     def logging(self, string):
         print('['+str(datetime.datetime.now())+'] [Server] '+str(string))
+        self.log_file = open("./Logs/local_portion/server_log.txt", "a")
         self.log_file.write('['+str(datetime.datetime.now())+'] [Server] '+str(string)+'\n')
-
-
-    def start_client_process(self, client_id):
-        path = "./data/Client"+str(client_id)+".pkl"
-        client = client_process.client(client_id, path, self.device)
-        client_process.set_seed()
-        tensor_list = []
-        for param in client.model.parameters():
-            tensor_list.append(param.data)
-        self.arrived_tensor_list[client_id-1] = tensor_list
-
-        for epoch in range(1,5):
-            for i, param in enumerate(client.model.parameters()):
-                param.data = self.aggregated_tensor_list[i].to(self.device)
-
-            client.epoch = epoch
-            client.train()
-            client.test()
-            self.arrived[client_id-1] = 1
-            
-            tensor_list = []
-            for param in client.model.parameters():
-                tensor_list.append(param.data)
-            self.arrived_tensor_list[client_id-1] = tensor_list
-            while self.arrived[client_id-1]:
-                time.sleep(0.01)
+        self.log_file.close()
 
     def aggregation_process(self):
-        for epoch in range(1,5):
+        for epoch in range(1,self.num_epoch+1):
+            '''BSP aggregation scheme'''
             while sum(self.arrived) != self.client_number:
                 time.sleep(0.01)
             aggregated_tensor_list = []
@@ -69,6 +54,7 @@ class server:
                 random_id = int(random.randint(0, self.client_number) % self.client_number)
                 if random_id not in client_portion_id_list:
                     client_portion_id_list.append(random_id)
+            self.logging("aggregation with client %s" % (str(client_portion_id_list)))
 
             for tensor_id, tensor_content in enumerate(self.arrived_tensor_list[0]):
                 sum_tensor = torch.zeros(tensor_content.size()).to(self.device)
@@ -77,24 +63,54 @@ class server:
                 aggregated_tensor = sum_tensor / self.client_number
                 aggregated_tensor_list.append(aggregated_tensor)
             
+            '''save global model'''
             self.aggregated_tensor_list = aggregated_tensor_list
             for i, param in enumerate(self.global_model.parameters()):
                 param.data = self.aggregated_tensor_list[i]
 
             self.logging("Tensors aggregated")
-            self.logging("Client portion idx list: %s" % (str(client_portion_id_list)))
             self.test()
     
+            '''reset'''    
             self.arrived = [0] * self.client_number
 
-      
-    def start_server_process(self):
+    def client_process_(self, client_id):
+        '''init client process'''
+        path = "./data/Client"+str(client_id)+".pkl"
+        client = client_process.client(client_id, path, self.device)
+        client_process.set_seed()
+
+        '''load global model'''
+        tensor_list = []
+        for param in client.model.parameters():
+            tensor_list.append(param.data)
+        self.arrived_tensor_list[client_id-1] = tensor_list
+
+        '''start training'''
+        for epoch in range(1,self.num_epoch+1):
+            for i, param in enumerate(client.model.parameters()):
+                param.data = self.aggregated_tensor_list[i].to(self.device)
+
+            client.epoch = epoch
+            client.train()
+            self.arrived[client_id-1] = 1
+            
+            tensor_list = []
+            for param in client.model.parameters():
+                tensor_list.append(param.data)
+            self.arrived_tensor_list[client_id-1] = tensor_list
+
+            '''waiting for aggregation'''
+            while self.arrived[client_id-1]:
+                time.sleep(0.01)
+
+    def server_process_(self):
         for i in range(1, self.client_number+1):
-            t = threading.Thread(target=self.start_client_process, args=(i, ))
+            t = threading.Thread(target=self.client_process_, args=(i, ))
             t.start()
         t = threading.Thread(target=self.aggregation_process, args=())
         t.start()
-    
+
     def test(self):
         self.global_model.eval()
         test_loss = 0
@@ -112,8 +128,10 @@ class server:
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--portion_number', type=int, default=2)
+    parser.add_argument('--client_num', type=int, default=20)
+    parser.add_argument('--num_epoch', type=int, default=5)
+    parser.add_argument('--m', type=float, default=0.8)
     args = parser.parse_args()
-    server_process = server(20, portion_number=args.portion_number)
-    server_process.start_server_process()
-    torch.save(server_process.global_model, "final_global_model_local_portion.pt")
+    server_process = server(args.client_num, args.num_epoch, args.m)
+    server_process.server_process_()
+    torch.save(server_process.global_model, "final_global_model_local.pt")
