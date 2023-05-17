@@ -50,8 +50,6 @@ class server:
         self.log_file.close()
 
     def aggregation_process(self, epoch):
-        start_time = time.time()
-
         client_portion_id_list = []
         while len(client_portion_id_list) < self.portion_number:
             random_id = int(random.randint(0, self.client_number) % self.client_number)
@@ -59,6 +57,7 @@ class server:
                 client_portion_id_list.append(random_id+1)
         self.logging("aggregation with client %s" % (str(client_portion_id_list)))
 
+        start_time = time.time()
         for client_id in client_portion_id_list:
             client_model_path = self.file_path+"client_"+str(client_id)+"_model_epoch_"+str(epoch)+".pth"
             model = torch.load(client_model_path)
@@ -81,7 +80,7 @@ class server:
             param.data = self.aggregated_tensor_list[i]
 
         end_time = time.time()
-        self.logging("Tensors aggregated, time cose: %.4f" % (end_time-start_time))
+        self.logging("Tensors aggregated, time cost: %.4f" % (end_time-start_time))
         self.test()
 
     def test(self):

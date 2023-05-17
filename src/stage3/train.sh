@@ -8,6 +8,9 @@ model_dir=$home/model/stage3/${trial_no}
 mkdir -p $log_dir
 mkdir -p $model_dir
 
+echo "log dir: "$log_dir
+echo "model dir: "$model_dir
+
 for ((i=1; i<=$n_clients; i++))
 do
     echo "start client "$i

@@ -8,6 +8,9 @@ model_dir=$home/model/stage1/${trial_no}
 mkdir -p $log_dir
 mkdir -p $model_dir
 
+echo "log dir: "$log_dir
+echo "model dir: "$model_dir
+
 echo "start server"
 taskset -c 0 python3 ./src/stage1/server_process.py --client_num $n_clients --num_epoch $n_epoch --trial $trial_no & 
 sleep 1
