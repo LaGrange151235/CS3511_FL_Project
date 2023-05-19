@@ -145,4 +145,5 @@ if __name__=="__main__":
             line = client_model.read(1024)
         client_model.close()
         client_socket.close()
-        os.system("rm -r "+client_process.file_path)
+        
+    os.system("rm -r "+client_process.file_path)
