@@ -117,3 +117,4 @@ if __name__=="__main__":
         for file in os.listdir(server_process.file_path):
             os.system("rm "+server_process.file_path+str(file))
     torch.save(server_process.global_model, server_process.file_path+"final_global_model.pth")
+    print("Done")

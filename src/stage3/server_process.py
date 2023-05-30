@@ -152,3 +152,4 @@ if __name__=="__main__":
     server_process.aggregation_process()
     os.system("rm "+server_process.file_path+"*.pth")
     torch.save(server_process.global_model, server_process.file_path+"final_global_model.pth")
+    print("Done")
