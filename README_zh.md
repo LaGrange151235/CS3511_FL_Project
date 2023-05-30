@@ -48,4 +48,11 @@ pip install -r requirements.txt
     Client server number: 20
     Epoch number: 50
     ```
+## 文件
+对于每个阶段，我们的代码文件都在`src/stage*`。在每个阶段，我们都有`client_process.py`，`dataset_manager.py`，`model.py`和`server_process.py`。
+- `client_process.py`: 客户端进程代码
+- `dataset_manager.py`: 读取所需数据集代码
+- `model.py`: 训练所需CNN模型代码
+- `server_process.py`: 服务器进程代码
+
 实验结束后，你可以在路径 `Logs`下找到日志文件并在路径`model`找到最终的全局模型。你也可以从交大云盘（[这里](https://jbox.sjtu.edu.cn/l/D1m5hr)）下载我的实验结果 `Logs`和`model`文件。

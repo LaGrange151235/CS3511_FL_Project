@@ -48,4 +48,11 @@ For each Stage, I provide a script `train.sh` for experiment.
     Client server number: 20
     Epoch number: 50
     ```
+## Files
+For each Stage, you can find code files at `src/stage*`. At each Stage, we have `client_process.py`, `dataset_manager.py`, `model.py` and `server_process.py`.
+- `client_process.py`: Code for client process
+- `dataset_manager.py`: Code for loading datasets we need
+- `model.py`: Code for CNN model we need
+- `server_process.py`: Code for server process
+
 When experiment finish, you can find log files at dir `Logs` and `final_global_model.pth` at dir `model`. You can also download `Logs` and `model` of my experiments from jbox([here](https://jbox.sjtu.edu.cn/l/D1m5hr)).
